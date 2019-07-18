@@ -1,18 +1,45 @@
 package com.example.timerapp
 
+import android.app.AlarmManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import android.os.CountDownTimer
-import androidx.appcompat.app.AppCompatActivity;
 import android.view.Menu
 import android.view.MenuItem
+import androidx.appcompat.app.AppCompatActivity
 import com.example.timerapp.util.PrefUtil
-
 import kotlinx.android.synthetic.main.activity_main.*
 import kotlinx.android.synthetic.main.content_main.*
+import java.util.*
 
 class MainActivity : AppCompatActivity() {
 
-    enum class TimerState{
+    companion object {
+        fun setAlarm(context: Context, nowSeconds: Long, secondsRemaining: Long): Long {
+            val wakeUpTime = (nowSeconds + secondsRemaining) * 1000
+            val alarmManager = context.getSystemService((Context.ALARM_SERVICE)) as AlarmManager
+            val intent = Intent(context, TimerExpiredReceiver::class.java)
+            val pendingIntent = PendingIntent.getBroadcast(context, 0, intent, 0)
+            alarmManager.setExact(AlarmManager.RTC_WAKEUP, wakeUpTime, pendingIntent)
+            PrefUtil.setAlarmSetTime(nowSeconds, context)
+            return wakeUpTime
+        }
+
+        fun removeAlarm(context: Context) {
+            val intent = Intent(context, TimerExpiredReceiver::class.java)
+            val pendingIntent = PendingIntent.getBroadcast(context, 0, intent, 0)
+            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            alarmManager.cancel(pendingIntent)
+            PrefUtil.setAlarmSetTime(0, context)
+        }
+
+        val nowSeconds: Long
+            get() = Calendar.getInstance().timeInMillis / 1000
+    }
+
+    enum class TimerState {
         Stopped, Paused, Running
     }
 
@@ -30,9 +57,9 @@ class MainActivity : AppCompatActivity() {
         supportActionBar?.setIcon(R.drawable.ic_timer)
         supportActionBar?.title = "        Timer App"
 
-        fab_start.setOnClickListener{v ->
+        fab_start.setOnClickListener { v ->
             startTimer()
-            timerState =  TimerState.Running
+            timerState = TimerState.Running
             updateButtons()
         }
 
@@ -68,17 +95,18 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         initTimer()
 
-            //TODO: Remove background timer, hide notification
+        removeAlarm(this)
+        //TODO: hide notification
     }
 
     override fun onPause() {
         super.onPause()
 
-        if (timerState == TimerState.Running){
+        if (timerState == TimerState.Running) {
             timer.cancel()
+            val wakeUpTime = setAlarm(this, nowSeconds, secondsRemaining)
             //TODO: Start background timer and show notification
-        }
-        else if (timerState == TimerState.Paused){
+        } else if (timerState == TimerState.Paused) {
             //TODO: Show notif
         }
 
@@ -87,7 +115,7 @@ class MainActivity : AppCompatActivity() {
         PrefUtil.setTimerState(timerState, this)
     }
 
-    private fun initTimer(){
+    private fun initTimer() {
         timerState = PrefUtil.getTimerState(this)
 
         if (timerState == TimerState.Stopped)
@@ -100,10 +128,13 @@ class MainActivity : AppCompatActivity() {
         else
             timerLengthSeconds
 
-        //TODO: Change secondsRemaining according to whre athe background tier stopped
+        val alarmSetTime = PrefUtil.getAlarmSetTime(this)
+        if (alarmSetTime > 0)
+            secondsRemaining -= nowSeconds - alarmSetTime
 
-        //resume where we left off
-        if(timerState == TimerState.Running)
+        if (secondsRemaining <= 0)
+            onTimerFinished()
+        else if (timerState == TimerState.Running)
             startTimer()
 
         updateButtons()
@@ -111,7 +142,7 @@ class MainActivity : AppCompatActivity() {
 
     }
 
-    private fun onTimerFinished(){
+    private fun onTimerFinished() {
         timerState = TimerState.Stopped
 
         setNewTimerLength()
@@ -125,10 +156,10 @@ class MainActivity : AppCompatActivity() {
         updateCountdownUI()
     }
 
-    private fun startTimer(){
+    private fun startTimer() {
         timerState = TimerState.Running
 
-        timer = object :  CountDownTimer(secondsRemaining * 1000, 1000){
+        timer = object : CountDownTimer(secondsRemaining * 1000, 1000) {
             override fun onFinish() = onTimerFinished()
 
             override fun onTick(millisUntilFinished: Long) {
@@ -138,40 +169,40 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    private fun setNewTimerLength(){
+    private fun setNewTimerLength() {
         val lengthInMinutes = PrefUtil.getTimerLength(this)
         timerLengthSeconds = (lengthInMinutes * 60L)
         progress_countdown.max = timerLengthSeconds.toInt()
     }
 
-    private fun setPreviousTimerLength(){
+    private fun setPreviousTimerLength() {
         timerLengthSeconds = PrefUtil.getPreviousTimerLengthSeconds(this)
         progress_countdown.max = timerLengthSeconds.toInt()
     }
 
-    private fun updateCountdownUI(){
+    private fun updateCountdownUI() {
         val minutesUntilFinished = secondsRemaining / 60
         val secondsInMinutesUntilFinished = secondsRemaining - minutesUntilFinished * 60
         val secondsStr = secondsInMinutesUntilFinished.toString()
         tv_countdown.text = "$minutesUntilFinished:${
         if (secondsStr.length == 2) secondsStr
-        else "0" + secondsStr }"
+        else "0" + secondsStr}"
         progress_countdown.progress = (timerLengthSeconds - secondsRemaining).toInt()
     }
 
-    private fun updateButtons(){
-        when (timerState){
-            TimerState.Running ->{
+    private fun updateButtons() {
+        when (timerState) {
+            TimerState.Running -> {
                 fab_start.isEnabled = false
                 fab_stop.isEnabled = true
                 fab_pause.isEnabled = true
             }
-            TimerState.Stopped ->{
+            TimerState.Stopped -> {
                 fab_start.isEnabled = true
                 fab_stop.isEnabled = false
                 fab_pause.isEnabled = false
             }
-            TimerState.Paused ->{
+            TimerState.Paused -> {
                 fab_start.isEnabled = true
                 fab_stop.isEnabled = true
                 fab_pause.isEnabled = false
